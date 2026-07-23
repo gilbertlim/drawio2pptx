@@ -201,12 +201,8 @@ ruff check .
 종단 테스트는 draw.io 데스크톱이 필요하고 없으면 스스로 건너뜁니다. 파싱과 좌표 계산 테스트는 어디서든
 돕니다. 코드를 고치기 전에 [CLAUDE.md](CLAUDE.md)에 정리된 불변 조건을 먼저 보세요.
 
-렌더러를 손봤다면 README 이미지를 다시 만드세요.
-
-```bash
-drawio2pptx examples/sample.drawio -o /tmp/s.pptx --verify /tmp/check.png
-python tools/make_preview.py /tmp/check.png examples/preview.png "PowerPoint — 31 separate objects"
-```
+맨 위 README 이미지(`examples/preview.png`)는 `--verify` 결과의 위 두 단을 나란히 붙인 것입니다.
+렌더러를 손봤다면 `--verify`를 돌려 그 두 단으로 다시 만들면 됩니다.
 
 ## 라이선스
 
