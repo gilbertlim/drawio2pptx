@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import html
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass
@@ -31,6 +31,10 @@ class EdgeRoute:
     points: list[tuple[float, float]]
     color: str
     width: float
+    # draw.io draws arrowheads at a fixed size. PowerPoint scales its own with the line
+    # width, so a hairline connector gets a tip too small to see and a short one loses it
+    # entirely. Carry draw.io's actual arrowhead outlines and emit them as filled subpaths.
+    arrowheads: list[list[tuple[float, float]]] = field(default_factory=list)
 
 
 _CELL_SPLIT = re.compile(r'(?=<g data-cell-id=")')
@@ -92,17 +96,23 @@ class SvgMap:
         block = self.blocks.get(cell_id)
         if not block:
             return None
-        m = re.search(r'<path d="([^"]+)"([^>]*)fill="none"([^>]*)/>', block)
-        if not m:
+        line = None
+        heads = []
+        for d, attrs in re.findall(r'<path d="([^"]+)"((?:(?!/>).)*)/>', block, re.S):
+            fill = re.search(r'\bfill="([^"]+)"', attrs)
+            pts = _path_points(d)
+            if fill and fill.group(1) == "none":
+                if line is None and len(pts) >= 2:
+                    line = (pts, attrs)
+            elif len(pts) >= 3:
+                heads.append(pts)
+        if line is None:
             return None
-        pts = _path_points(m.group(1))
-        if len(pts) < 2:
-            return None
-        rest = m.group(2) + m.group(3)
-        stroke = (re.search(r'stroke="([^"]+)"', rest) or [None, "#000000"])[1]
-        sw = re.search(r'stroke-width="([\d.]+)"', rest)
+        pts, attrs = line
+        stroke = (re.search(r'stroke="([^"]+)"', attrs) or [None, "#000000"])[1]
+        sw = re.search(r'stroke-width="([\d.]+)"', attrs)
         return EdgeRoute(points=pts, color=normalize_color(stroke) or "#000000",
-                         width=float(sw.group(1)) if sw else 1.0)
+                         width=float(sw.group(1)) if sw else 1.0, arrowheads=heads)
 
 
 # ------------------------------------------------------------------- internals

@@ -136,3 +136,41 @@ def test_slide_size_presets(tmp_path):
     convert(SAMPLE, tmp_path / "b.pptx", slide_size="13.333x7.5")
     prs = Presentation(str(tmp_path / "b.pptx"))
     assert prs.slide_width == Emu(int(13.333 * 914400))
+
+
+def test_arrowheads_are_drawn_at_drawio_size(tmp_path):
+    """PowerPoint scales its own arrowheads with line width, which erases them on
+    hairline connectors. Each arrow must instead carry draw.io's own filled outline."""
+    from lxml import etree
+    from pptx.oxml.ns import qn
+
+    src = tmp_path / "arrow.drawio"
+    src.write_text(
+        '<mxfile><diagram name="p" id="p"><mxGraphModel grid="0" page="1">'
+        '<root><mxCell id="0"/><mxCell id="1" parent="0"/>'
+        '<mxCell id="e" style="endArrow=classic;startArrow=classic;html=1;" edge="1" '
+        'parent="1"><mxGeometry relative="1" as="geometry">'
+        '<mxPoint x="100" y="100" as="sourcePoint"/>'
+        '<mxPoint x="100" y="118" as="targetPoint"/></mxGeometry></mxCell>'
+        '<mxCell id="v" value="anchor" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" '
+        'parent="1"><mxGeometry x="200" y="200" width="120" height="60" as="geometry"/>'
+        "</mxCell></root></mxGraphModel></diagram></mxfile>",
+        encoding="utf-8")
+
+    out = tmp_path / "arrow.pptx"
+    convert(src, out)
+    connectors = [s for s in Presentation(str(out)).slides[0].shapes
+                  if s._element.spPr.find(qn("a:custGeom")) is not None]
+    assert connectors, "the edge should have produced a freeform"
+
+    paths = connectors[0]._element.spPr.find(qn("a:custGeom")).find(qn("a:pathLst"))
+    kinds = [p.get("fill") for p in paths.findall(qn("a:path"))]
+    assert kinds[0] == "none", "the route itself must not be filled"
+    assert kinds.count("norm") == 2, f"expected two filled arrowheads, got {kinds}"
+
+    # every arrowhead vertex has to sit inside the shape box or PowerPoint clips the tip
+    for path in paths.findall(qn("a:path")):
+        w, h = int(path.get("w")), int(path.get("h"))
+        for pt in path.iter(qn("a:pt")):
+            assert 0 <= int(pt.get("x")) <= w and 0 <= int(pt.get("y")) <= h, \
+                etree.tostring(path)

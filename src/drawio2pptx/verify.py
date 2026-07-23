@@ -108,17 +108,23 @@ def render_slide(pptx_path: str | Path, slide_index: int, out_png: str | Path,
 
         geom = spPr.find(qn("a:custGeom")) if spPr is not None else None
         if geom is not None:
-            path = geom.find(qn("a:pathLst")).find(qn("a:path"))
-            pw, ph = int(path.get("w") or 0), int(path.get("h") or 0)
-            pts = []
-            for node in path:
-                pt = node.find(qn("a:pt"))
-                if pt is None:
+            # a connector is one open subpath for the route plus closed, filled subpaths
+            # for the arrowheads draw.io drew
+            for path in geom.find(qn("a:pathLst")).findall(qn("a:path")):
+                pw, ph = int(path.get("w") or 0), int(path.get("h") or 0)
+                pts = []
+                for node in path:
+                    pt = node.find(qn("a:pt"))
+                    if pt is None:
+                        continue
+                    px, py = int(pt.get("x")), int(pt.get("y"))
+                    pts.append((x0 + (px / pw * (x1 - x0) if pw else 0),
+                                y0 + (py / ph * (y1 - y0) if ph else 0)))
+                if len(pts) < 2:
                     continue
-                px, py = int(pt.get("x")), int(pt.get("y"))
-                pts.append((x0 + (px / pw * (x1 - x0) if pw else 0),
-                            y0 + (py / ph * (y1 - y0) if ph else 0)))
-            if len(pts) >= 2:
+                if path.get("fill") == "norm":
+                    dr.polygon(pts, fill=fill or stroke or (0, 0, 0))
+                    continue
                 dr.line(pts, fill=stroke or (0, 0, 0), width=lw)
                 for tag, tip, prev in ((qn("a:headEnd"), pts[0], pts[1]),
                                        (qn("a:tailEnd"), pts[-1], pts[-2])):

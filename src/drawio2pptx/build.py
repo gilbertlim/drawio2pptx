@@ -51,6 +51,7 @@ class Element:
     points: list[tuple[float, float]] = field(default_factory=list)
     head_arrow: bool = False
     tail_arrow: bool = False
+    arrowheads: list[list[tuple[float, float]]] = field(default_factory=list)
     label: Label | None = None
 
 
@@ -127,6 +128,7 @@ def collect(page: model.Page, svg: SvgMap, rendered: dict[str, stencils.Rendered
                 out.append(Element(
                     kind="line", x=0, y=0, w=0, h=0, name=_label_name(cell, "line"),
                     stroke=route.color, stroke_w=route.width, points=route.points,
+                    arrowheads=route.arrowheads,
                     head_arrow=cell.st.get("startArrow") not in (None, "none"),
                     tail_arrow=cell.st.get("endArrow") not in (None, "none"),
                 ))
@@ -178,8 +180,9 @@ def content_bounds(elements: list[Element]) -> tuple[float, float, float, float]
     xs, ys = [], []
     for e in elements:
         if e.kind == "line":
-            xs += [p[0] for p in e.points]
-            ys += [p[1] for p in e.points]
+            pts = [*e.points, *(p for poly in e.arrowheads for p in poly)]
+            xs += [p[0] for p in pts]
+            ys += [p[1] for p in pts]
         else:
             xs += [e.x, e.x + e.w]
             ys += [e.y, e.y + e.h]
@@ -256,17 +259,56 @@ class _Emitter:
         return pic
 
     def line(self, e: Element):
+        """One freeform holding the route plus draw.io's own arrowhead polygons.
+
+        Keeping the arrowheads inside the same shape means the connector still moves as
+        one object, while the tips stay the size draw.io drew them at instead of shrinking
+        with the line width the way PowerPoint's own arrowheads do.
+        """
         pts = e.points
         ff = self.shapes.build_freeform(self.X(pts[0][0]), self.Y(pts[0][1]))
         ff.add_line_segments([(self.X(x), self.Y(y)) for x, y in pts[1:]], close=False)
         sh = ff.convert_to_shape()
         sh.name = e.name
-        sh.fill.background()
-        sh.line.color.rgb = _rgb(e.stroke) or RGBColor(0, 0, 0)
+        colour = _rgb(e.stroke) or RGBColor(0, 0, 0)
+        sh.line.color.rgb = colour
         sh.line.width = self.L(e.stroke_w)
-        self._arrows(sh.line, e.head_arrow, e.tail_arrow)
+        if e.arrowheads:
+            sh.fill.solid()                       # only the arrowhead subpaths take it
+            sh.fill.fore_color.rgb = colour
+            self._rebuild_with_arrowheads(sh, pts, e.arrowheads)
+        else:
+            sh.fill.background()
+            self._arrows(sh.line, e.head_arrow, e.tail_arrow)
         self._no_theme_effects(sh)
         return sh
+
+    def _rebuild_with_arrowheads(self, shape, route, polygons):
+        """Redo the custGeom over route + arrowheads, so no tip falls outside the bounds."""
+        emu = [[(int(self.X(x)), int(self.Y(y))) for x, y in poly]
+               for poly in [route, *polygons]]
+        xs = [p[0] for poly in emu for p in poly]
+        ys = [p[1] for poly in emu for p in poly]
+        left, top = min(xs), min(ys)
+        w, h = max(xs) - left, max(ys) - top
+
+        shape.left, shape.top, shape.width, shape.height = Emu(left), Emu(top), Emu(w), Emu(h)
+        path_lst = shape._element.spPr.find(qn("a:custGeom")).find(qn("a:pathLst"))
+        for old in list(path_lst):
+            path_lst.remove(old)
+
+        for i, poly in enumerate(emu):
+            closed = i > 0                                   # index 0 is the route itself
+            path = path_lst.makeelement(
+                qn("a:path"), {"w": str(w), "h": str(h), "fill": "norm" if closed else "none"})
+            for j, (px, py) in enumerate(poly):
+                node = path.makeelement(qn("a:moveTo") if j == 0 else qn("a:lnTo"), {})
+                pt = node.makeelement(qn("a:pt"), {"x": str(px - left), "y": str(py - top)})
+                node.append(pt)
+                path.append(node)
+            if closed:
+                path.append(path.makeelement(qn("a:close"), {}))
+            path_lst.append(path)
 
     def text(self, e: Element):
         lab = e.label
