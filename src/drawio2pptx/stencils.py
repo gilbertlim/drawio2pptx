@@ -64,8 +64,16 @@ def find_drawio(explicit: str | None = None) -> str:
 
 def run(binary: str, args: list[str], timeout: int = 300) -> None:
     cmd = [binary, "-x", *args, "--no-sandbox", "--disable-gpu"]
-    proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout,
-                          env={**os.environ, "ELECTRON_DISABLE_SECURITY_WARNINGS": "1"})
+    env = {**os.environ, "ELECTRON_DISABLE_SECURITY_WARNINGS": "1"}
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, env=env)
+    except subprocess.TimeoutExpired:
+        # a draw.io window already holding the user-data-dir makes CLI exports queue forever
+        raise RuntimeError(
+            f"draw.io did not finish within {timeout}s.\n"
+            "  if the draw.io app is open, close it and run this again — a running window "
+            "can block CLI exports"
+        ) from None
     if proc.returncode != 0:
         raise RuntimeError(f"draw.io export failed ({proc.returncode}):\n"
                            f"{proc.stderr.strip() or proc.stdout.strip()}")
