@@ -38,16 +38,17 @@ sudo snap install drawio              # Linux
 winget install JGraph.Draw            # Windows
 ```
 
-Then:
+Then install this repo:
 
 ```bash
-pip install git+https://github.com/OWNER/drawio2pptx      # not on PyPI yet
+git clone <this repo> && cd drawio2pptx
+pip install .
 ```
 
-or from a clone:
+Or run it straight from a clone without installing:
 
 ```bash
-pip install -e .
+uv run --with python-pptx --with pillow python -m drawio2pptx diagram.drawio
 ```
 
 ## Usage
