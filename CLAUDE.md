@@ -1,88 +1,81 @@
-# Working on drawio2pptx
+# drawio2pptx 작업 가이드
 
-Converts one draw.io page into separate native PowerPoint objects. README explains what it
-does for users; this file is about not breaking it.
+draw.io 페이지 하나를 개별 PowerPoint 객체로 변환하는 도구다. 무엇을 하는지는 README에 있고,
+이 문서는 **뭘 건드리면 조용히 깨지는지**를 다룬다.
 
-## Run it
+## 실행
 
 ```bash
 pip install -e ".[dev]"
-pytest -q                 # 34 tests; the end-to-end ones self-skip without draw.io desktop
+pytest -q                 # 34개. 종단 테스트는 draw.io 데스크톱 없으면 스스로 건너뜀
 ruff check .
 drawio2pptx examples/sample.drawio -o /tmp/s.pptx --verify /tmp/check.png
 ```
 
-The installed copy on this machine came from `uv tool install .`, so after changing the
-source run `uv tool install --reinstall .` or the `drawio2pptx` on PATH stays stale.
+이 머신에 설치된 실행 파일은 `uv tool install .`로 넣은 것이다. 소스를 고친 뒤에는
+`uv tool install --reinstall .`을 돌려야 PATH의 `drawio2pptx`가 갱신된다.
 
-## The one invariant everything rests on
+## 모든 것이 얹혀 있는 불변 조건 하나
 
-draw.io's PNG and SVG exports always crop to the graph bounds, so the origin shifts
-whenever the content changes. Two renders of the same diagram do not share a coordinate
-system, which makes cropping a single icon out of a sheet impossible by itself.
+draw.io는 PNG든 SVG든 항상 그래프 경계에 맞춰 잘라낸다. 내용이 바뀌면 원점이 따라 움직이고, 같은
+다이어그램을 두 번 렌더해도 좌표계가 공유되지 않는다. 그래서 시트에서 아이콘 하나만 오려내는 게
+그 자체로는 불가능하다.
 
-The fix: `model.with_frame()` injects an invisible rect (`__d2p_frame`) into a copy of the
-diagram before every export. `svgmap.SvgMap.frame_rect()` then reads back where that rect
-actually landed, and that reading — not the frame you asked for — is the origin. Reading it
-back rather than assuming it means an overflowing label just grows the canvas without
-breaking the mapping.
+해법: `model.with_frame()`이 export 직전에 다이어그램 복사본으로 보이지 않는 사각형(`__d2p_frame`)을
+끼워 넣는다. 그리고 `svgmap.SvgMap.frame_rect()`가 **그 사각형이 실제로 그려진 위치**를 읽어오는데,
+요청한 프레임 값이 아니라 이 읽은 값이 원점이다. 가정하지 않고 되읽기 때문에 라벨이 프레임 밖으로
+넘쳐 캔버스가 커져도 매핑이 깨지지 않는다.
 
-All element geometry lives in **SVG coordinates**. Cell boxes come from the model in
-draw.io coordinates and get shifted in `build.collect()`; labels and edge routes already
-arrive in SVG space. Mixing the two silently offsets everything by the frame padding, and
-the tests will not catch it because they check bounds, not exact placement. Run `--verify`.
+모든 요소의 좌표는 **SVG 좌표계**에 산다. 셀 박스는 모델에서 draw.io 좌표로 들어와 `build.collect()`
+에서 이동되고, 라벨과 연결선 경로는 처음부터 SVG 공간으로 들어온다. 이 둘을 섞으면 전체가 프레임
+패딩만큼 조용히 어긋나는데, 테스트는 경계만 검사하므로 잡지 못한다. `--verify`를 돌려야 한다.
 
-## Things that cost real time to find
+## 알아내는 데 시간을 쓴 것들
 
-- **`-p` on the draw.io CLI is 1-based.** Passing 0 silently gives you page 1, so an
-  off-by-one shows up as the wrong shape rendered rather than an error.
-- **Image crops live in a separate style key**, `clipPath=inset(top% right% bottom% left%)`,
-  not inside the `image=data:...` URI. Skip it and cropped logos come out shrunken and
-  offset. `build.extract_bitmap()` handles it.
-- **Colours arrive as `light-dark(light, dark)`.** Take the first half. `svgmap.normalize_color()`
-  is the only place that should parse a colour.
-- **In HTML labels the innermost declaration wins.** An outer div saying `font-weight: bold`
-  gets overridden by a `<span style="font-weight: normal">` inside it, so `_label_from_foreign_object()`
-  takes the *last* match for weight, size and colour. Same for `font-family`.
-- **python-pptx autoshapes and freeforms inherit `effectRef` from the theme**, which paints a
-  drop shadow on every box and connector. `_Emitter._no_theme_effects()` kills it and
-  `test_no_shape_inherits_a_theme_shadow` guards it; anything new that calls `add_shape` or
-  `build_freeform` needs the same treatment.
-- **`a:ln` children are order-sensitive.** solidFill, then prstDash, then headEnd, then
-  tailEnd. Appending out of order produces a file PowerPoint offers to repair.
-- **PowerPoint and Keynote AppleScript automation are blocked on this machine** — `open`
-  succeeds and leaves zero documents. Don't burn time on it; `verify.py` exists because of it.
+- **draw.io CLI의 `-p`는 1-based다.** 0을 넘기면 조용히 1페이지가 나오므로, off-by-one이 오류가 아니라
+  "엉뚱한 도형이 렌더됨"으로 나타난다.
+- **이미지 크롭은 별도 스타일 키에 있다.** `image=data:...` URI 안이 아니라 `clipPath=inset(위% 오른쪽%
+  아래% 왼쪽%)`이다. 놓치면 크롭된 로고가 작고 어긋나게 들어간다. `build.extract_bitmap()`이 처리한다.
+- **색상은 `light-dark(밝은값, 어두운값)` 형태로 들어온다.** 앞쪽을 써야 한다. 색 파싱은
+  `svgmap.normalize_color()` 한 곳에서만 해야 한다.
+- **HTML 라벨은 안쪽 선언이 이긴다.** 바깥 div가 `font-weight: bold`라도 안쪽
+  `<span style="font-weight: normal">`이 덮어쓴다. 그래서 `_label_from_foreign_object()`는 굵기, 크기,
+  색, 폰트를 모두 **마지막** 매치로 잡는다.
+- **python-pptx의 도형과 자유형은 테마 `effectRef`를 상속한다.** 모든 박스와 커넥터에 드롭 섀도가
+  붙는다는 뜻이다. `_Emitter._no_theme_effects()`가 막고 `test_no_shape_inherits_a_theme_shadow`가
+  지킨다. `add_shape`나 `build_freeform`을 새로 부르는 코드는 똑같이 처리해야 한다.
+- **`a:ln`의 자식 순서는 스키마로 강제된다.** solidFill, prstDash, headEnd, tailEnd 순서다. 어기면
+  PowerPoint가 "복구하시겠습니까"를 띄우는 파일이 나온다.
+- **이 머신에서는 PowerPoint와 Keynote의 AppleScript 자동화가 막혀 있다.** `open`은 성공하는데 열린
+  문서가 0개다. 여기에 시간 쓰지 말 것. `verify.py`가 존재하는 이유가 이것이다.
 
-## Layer packing
+## 레이어 묶기
 
-`stencils.plan_layers()` packs shapes that don't overlap into one draw.io invocation, since
-each invocation costs a few seconds. The invariant is that no cell's crop box may touch
-another cell's painted pixels in the same layer, or the crop picks up its neighbour.
+`stencils.plan_layers()`는 겹치지 않는 도형들을 draw.io 한 번 실행에 몰아넣는다. 실행 한 번에 몇 초씩
+들기 때문이다. 불변 조건은 **같은 레이어 안에서 어떤 셀의 크롭 박스도 다른 셀이 그린 픽셀에 닿으면
+안 된다**는 것이다. 닿으면 크롭이 옆 도형을 물고 들어온다.
 
-`aws4.group` is the awkward case: the cell box is the whole container, but only a ~25px badge
-in the top-left corner gets painted (the border is drawn natively instead, with `strokeColor`
-forced to `none` in the render copy). `crop_box()` shrinks group cells to `GROUP_ICON_EXTENT`
-so shapes sitting inside the container don't collide with it. Widening that constant will
-start capturing children.
+`aws4.group`이 까다로운 경우다. 셀 박스는 컨테이너 전체인데 실제로 칠해지는 건 왼쪽 위 25px 남짓의
+배지뿐이다(테두리는 네이티브로 그리고, 렌더 복사본에서는 `strokeColor`를 `none`으로 바꾼다).
+`crop_box()`가 그룹 셀을 `GROUP_ICON_EXTENT`로 줄여서, 컨테이너 안에 있는 도형들과 충돌하지 않게
+한다. 이 상수를 키우면 자식 도형을 물기 시작한다.
 
-## verify.py is deliberately approximate
+## verify.py는 의도적으로 근사치다
 
-It redraws the saved `.pptx` with PIL to catch shapes in the wrong place. It is not trying to
-be PowerPoint, and its text metrics differ — thin outlines around glyphs and strokes in the
-difference panel are expected and fine. Solid filled regions mean something moved. Don't
-"fix" the glyph-edge noise; that direction leads to reimplementing a text layout engine.
+저장된 `.pptx`를 PIL로 다시 그려서 도형이 엉뚱한 자리에 갔는지 잡는 용도다. PowerPoint를 흉내 내려는
+게 아니고, 텍스트 메트릭이 다르다. 차이 패널에 글자와 선 테두리를 따라 나오는 얇은 윤곽선은 정상이고
+문제없다. 면으로 찬 영역이 나오면 그건 실제로 어긋난 것이다. 윤곽선 노이즈를 "고치려" 들지 말 것.
+그 길 끝에는 텍스트 레이아웃 엔진 재구현이 있다.
 
-## Adding support for a new shape type
+## 새 도형 타입 지원 추가
 
-`stencils.needs_render()` decides what draw.io has to draw versus what becomes a native
-object. Default to native only when PowerPoint can express the thing exactly: a rectangle
-with a fill, a border and a dash pattern. Everything else renders. Rotated shapes and
-swimlanes are unhandled and will place wrongly rather than fail loudly, so if you touch
-those, add a case to `collect()` and a test.
+`stencils.needs_render()`가 draw.io에게 그리게 할지, 네이티브 객체로 만들지를 가른다. PowerPoint가
+정확히 표현할 수 있을 때만 네이티브로 보내라. 채우기와 테두리, 점선이 있는 사각형 정도다. 나머지는
+렌더한다. 회전된 도형과 스윔레인은 미지원이고, 실패하는 대신 잘못된 위치에 놓인다. 이쪽을 건드린다면
+`collect()`에 분기와 테스트를 함께 추가할 것.
 
-## Never commit someone's real diagram
+## 남의 실제 다이어그램을 커밋하지 말 것
 
-`examples/sample.drawio` is deliberately generic (DMZ, WAS, DBMS). Architecture diagrams from
-actual work are internal, sometimes regulator-facing, and must not land in this repo, in a
-test fixture, or in a published artifact. If you need a real diagram to reproduce a bug, keep
-it under `fixtures-private/`, which is gitignored.
+`examples/sample.drawio`는 일부러 일반적인 내용이다(DMZ, WAS, DBMS). 실무에서 나온 아키텍처 구성도는
+사내 자산이고 규제기관 제출용인 경우도 있다. 이 레포에도, 테스트 픽스처에도, 공개 아티팩트에도 들어가면
+안 된다. 버그 재현에 실제 다이어그램이 필요하면 gitignore된 `fixtures-private/` 아래에 두고 쓴다.
