@@ -77,11 +77,23 @@ git clone https://github.com/gilbertlim/drawio2pptx && cd drawio2pptx
 pip install .
 ```
 
-시스템 파이썬을 건드리기 싫으면 `uv tool install .` 또는 `pipx install .`을 쓰세요. 아무것도 설치하지
-않고 클론에서 바로 돌리려면:
+시스템 파이썬을 건드리기 싫으면 `uv tool install .` 또는 `pipx install .`을 쓰세요. 셋 중 하나만 하면
+됩니다.
+
+아무것도 설치하지 않고 클론에서 바로 돌려볼 수도 있습니다.
 
 ```bash
-uv run --with python-pptx --with pillow python -m drawio2pptx diagram.drawio
+uv run --with python-pptx --with pillow python -m drawio2pptx examples/sample.drawio
+```
+
+### 잘 되는지 먼저 확인
+
+레포에 예제가 들어 있으니 이걸로 한 번 돌려보세요. 아래 명령들에 나오는 `diagram.drawio`는 실제 파일이
+아니라 **자리표시자**입니다. 본인 파일 경로로 바꿔서 쓰세요.
+
+```bash
+drawio2pptx examples/sample.drawio -o hello.pptx
+# hello.pptx  (slide 1, 31 objects: 3 shapes, 8 connectors, 11 text boxes, 9 icons)
 ```
 
 ### 명령줄

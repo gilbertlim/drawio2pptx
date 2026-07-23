@@ -338,7 +338,7 @@ def convert(source: str | Path, output: str | Path | None = None, *,
     """Convert one page of `source` into native shapes on a PowerPoint slide."""
     source = Path(source).expanduser().resolve()
     if not source.exists():
-        raise FileNotFoundError(source)
+        raise FileNotFoundError(f"no such diagram: {source}")
     binary = stencils.find_drawio(drawio)
 
     pages = model.parse(source)

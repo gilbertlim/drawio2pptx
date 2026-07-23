@@ -141,3 +141,22 @@ def test_find_drawio_reports_how_to_install():
     with pytest.raises(stencils.DrawioNotFound) as exc:
         stencils.find_drawio("/definitely/not/here")
     assert "/definitely/not/here" in str(exc.value)
+
+
+# ------------------------------------------------------------------ cli entry
+def test_missing_file_explains_the_docs_placeholder(capsys):
+    from drawio2pptx import cli
+
+    assert cli.main(["diagram.drawio"]) == 1
+    err = capsys.readouterr().err
+    assert "no such diagram" in err
+    assert "placeholder" in err, "the docs use diagram.drawio; say so instead of an OSError"
+
+
+def test_missing_file_without_the_placeholder_name(capsys):
+    from drawio2pptx import cli
+
+    assert cli.main(["nope.drawio"]) == 1
+    err = capsys.readouterr().err
+    assert "no such diagram" in err
+    assert "placeholder" not in err

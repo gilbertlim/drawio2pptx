@@ -63,6 +63,16 @@ def main(argv: list[str] | None = None) -> int:
     source = Path(args.source).expanduser()
     say = (lambda *_: None) if args.quiet else (lambda m: print(f"  {m}", file=sys.stderr))
 
+    if not source.exists():
+        print(f"drawio2pptx: no such diagram: {source}", file=sys.stderr)
+        sample = Path(__file__).resolve().parents[2] / "examples" / "sample.drawio"
+        if source.name == "diagram.drawio":
+            print("  'diagram.drawio' is the placeholder used in the docs — "
+                  "replace it with your own file.", file=sys.stderr)
+        if sample.exists():
+            print(f"  to try the bundled example:  drawio2pptx {sample}", file=sys.stderr)
+        return 1
+
     try:
         pages = model.parse(source)
         if args.list_pages:
