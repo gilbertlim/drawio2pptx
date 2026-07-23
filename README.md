@@ -135,6 +135,9 @@ pytest -q          # end-to-end tests skip themselves without draw.io installed
 ruff check .
 ```
 
+The end-to-end tests need draw.io desktop; without it they skip and only the
+parsing and geometry tests run.
+
 Regenerate the README image after touching the renderer:
 
 ```bash
