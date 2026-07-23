@@ -117,9 +117,27 @@ TEXT_SVG = """<svg width="100px" height="50px" viewBox="0 0 100 50">
 
 def test_label_uses_the_background_rect_as_the_exact_box():
     lab = SvgMap(TEXT_SVG).label("n1")
-    assert lab.lines == ["DBMS"]
+    assert lab.text == "DBMS"
+    assert [r.size for line in lab.lines for r in line] == [12.0]
     assert (lab.x, lab.y, lab.w, lab.h) == (60, 290, 37, 15)
     assert lab.size == 12 and lab.align == "center" and lab.bg == "#EEF0F3"
+
+
+FO_MIXED = """<svg><g data-cell-id="mix"><g><g><switch><foreignObject>
+<div xmlns="http://www.w3.org/1999/xhtml" style="display: flex;">
+<div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+<div style="display: inline-block; font-size: 12px; font-family: Helvetica;">
+<font style="font-size: 20px;">\u23f0</font> Text</div></div></div>
+</foreignObject><image x="1" y="2" width="60" height="30"/></switch></g></g></g></svg>"""
+
+
+def test_a_line_keeps_a_separate_size_per_run():
+    """A 20px emoji next to 12px text must not drag the text up to 20px."""
+    lab = SvgMap(FO_MIXED).label("mix")
+    assert len(lab.lines) == 1
+    sizes = [(r.text, r.size) for r in lab.lines[0]]
+    assert sizes == [("\u23f0", 20.0), (" Text", 12.0)], sizes
+    assert lab.size == 20.0, "line spacing follows the tallest run"
 
 
 def test_edge_route_keeps_every_bend():

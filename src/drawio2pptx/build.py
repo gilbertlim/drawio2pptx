@@ -337,21 +337,23 @@ class _Emitter:
         else:
             tb.fill.background()
         tb.line.fill.background()
-        color = _rgb(lab.color)
-        for i, text in enumerate(lab.lines):
+        for i, line in enumerate(lab.lines):
             p = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
             p.alignment = PP_ALIGN.CENTER if lab.align == "center" else PP_ALIGN.LEFT
-            p.line_spacing = Pt(self.pt(lab.size * 1.25))
-            run = p.add_run()
-            run.text = text
-            run.font.size = Pt(self.pt(lab.size))
-            run.font.bold = lab.bold
-            run.font.name = self.font or lab.family
-            if color:
-                run.font.color.rgb = color
-            if self.ea_font:
-                rPr = run._r.get_or_add_rPr()
-                rPr.append(rPr.makeelement(qn("a:ea"), {"typeface": self.ea_font}))
+            # a line may mix sizes (a 20px emoji next to 12px text); space it by the tallest
+            p.line_spacing = Pt(self.pt(max(r.size for r in line) * 1.25))
+            for spec in line:
+                run = p.add_run()
+                run.text = spec.text
+                run.font.size = Pt(self.pt(spec.size))
+                run.font.bold = spec.bold
+                run.font.name = self.font or lab.family
+                colour = _rgb(spec.color)
+                if colour:
+                    run.font.color.rgb = colour
+                if self.ea_font:
+                    rPr = run._r.get_or_add_rPr()
+                    rPr.append(rPr.makeelement(qn("a:ea"), {"typeface": self.ea_font}))
         return tb
 
     def emit(self, elements: list[Element]) -> dict:

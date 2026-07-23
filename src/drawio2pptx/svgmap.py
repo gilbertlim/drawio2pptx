@@ -9,21 +9,36 @@ from __future__ import annotations
 import html
 import re
 from dataclasses import dataclass, field
+from html.parser import HTMLParser
+
+
+@dataclass
+class Run:
+    """A stretch of label text sharing one set of character properties."""
+    text: str
+    size: float                 # px, as drawn
+    bold: bool
+    color: str | None           # '#rrggbb'
 
 
 @dataclass
 class Label:
-    lines: list[str]
+    # one entry per rendered line; a line can mix sizes, e.g. a 20px emoji then 12px text
+    lines: list[list[Run]]
     x: float
     y: float
     w: float
     h: float
-    size: float                 # px, as drawn
+    size: float                 # tallest run, used for line spacing
     bold: bool
-    color: str | None           # '#rrggbb'
+    color: str | None
     bg: str | None
     align: str                  # 'left' | 'center'
     family: str = "Helvetica"
+
+    @property
+    def text(self) -> str:
+        return "\n".join("".join(r.text for r in line) for line in self.lines)
 
 
 @dataclass
@@ -212,8 +227,8 @@ def _label_from_text(block: str) -> Label | None:
     if not fs_m:
         return None
     size = float(fs_m.group(1))
-    lines = [strip_markup(t) for t in re.findall(r"<text[^>]*>(.*?)</text>", inner, re.S)]
-    if not lines:
+    texts = [strip_markup(t) for t in re.findall(r"<text[^>]*>(.*?)</text>", inner, re.S)]
+    if not texts:
         return None
     anchor = (re.search(r'text-anchor="([^"]+)"', attrs) or [None, "start"])[1]
     rect = _BG_RECT.search(inner)
@@ -226,11 +241,14 @@ def _label_from_text(block: str) -> Label | None:
               for t in re.findall(r"<text[^>]*>", inner)]
         ys = [float(re.search(r'y="([\d.\-]+)"', t).group(1))
               for t in re.findall(r"<text[^>]*>", inner)]
-        w = max(len(line) for line in lines) * size * 0.62
+        w = max(len(t) for t in texts) * size * 0.62
         x = min(xs) - w / 2 if anchor == "middle" else min(xs)
-        y, h = min(ys) - size, len(lines) * size * 1.25
+        y, h = min(ys) - size, len(texts) * size * 1.25
+    bold = 'font-weight="bold"' in attrs
+    colour = normalize_color(m.group(1))
+    lines = [[Run(t, size, bold, colour)] for t in texts]
     return Label(lines=lines, x=x, y=y, w=w, h=h, size=size,
-                 bold='font-weight="bold"' in attrs,
+                 bold=bold,
                  color=normalize_color(m.group(1)), bg=normalize_color(bg),
                  align="center" if anchor == "middle" else "left",
                  family=m.group(2).split(",")[0].strip() or "Helvetica")
@@ -245,6 +263,81 @@ _COLOR = re.compile(r'(?<![-\w])color:\s*(light-dark\([^)]*\)[^;"]*\)?|#[0-9a-fA
                     r'|rgb\([^)]*\))')
 
 
+class _RunParser(HTMLParser):
+    """Split a draw.io HTML label into runs, tracking nested character styling.
+
+    Labels commonly mix sizes inside one line — `<font style="font-size: 20px">emoji</font>
+    Text` — so collapsing a line to a single size blows up the smaller half.
+    """
+
+    BREAKS = {"div", "p", "li"}
+
+    def __init__(self, size: float, bold: bool, color: str | None):
+        super().__init__(convert_charrefs=True)
+        self.stack = [(size, bold, color)]
+        self.lines: list[list[Run]] = [[]]
+
+    def _push(self, tag, attrs):
+        size, bold, color = self.stack[-1]
+        style = dict(attrs).get("style") or ""
+        m = re.search(r"font-size:\s*([\d.]+)px", style)
+        if m:
+            size = float(m.group(1))
+        m = re.search(r"font-weight:\s*(\w+)", style)
+        if m:
+            bold = m.group(1) in ("bold", "700", "800", "900")
+        if tag in ("b", "strong"):
+            bold = True
+        m = _COLOR.search(style)
+        if m:
+            color = normalize_color(m.group(1)) or color
+        self.stack.append((size, bold, color))
+
+    def handle_starttag(self, tag, attrs):
+        if tag == "br":
+            self.lines.append([])
+            return
+        if tag in self.BREAKS and self.lines[-1]:
+            self.lines.append([])
+        self._push(tag, attrs)
+
+    def handle_startendtag(self, tag, attrs):
+        if tag == "br":
+            self.lines.append([])
+
+    def handle_endtag(self, tag):
+        if tag != "br" and len(self.stack) > 1:
+            self.stack.pop()
+
+    def handle_data(self, data):
+        text = data.replace("\xa0", " ")
+        if not text:
+            return
+        if not text.strip():
+            if self.lines[-1]:          # keep separators between runs, drop layout whitespace
+                self.lines[-1].append(Run(" ", *self.stack[-1]))
+            return
+        self.lines[-1].append(Run(text, *self.stack[-1]))
+
+    def result(self) -> list[list[Run]]:
+        out = []
+        for line in self.lines:
+            merged: list[Run] = []
+            for run in line:
+                prev = merged[-1] if merged else None
+                if prev and (prev.size, prev.bold, prev.color) == (run.size, run.bold, run.color):
+                    merged[-1] = Run(prev.text + run.text, run.size, run.bold, run.color)
+                else:
+                    merged.append(run)
+            if not merged or not "".join(r.text for r in merged).strip():
+                continue
+            first, last = merged[0], merged[-1]
+            merged[0] = Run(first.text.lstrip(), first.size, first.bold, first.color)
+            merged[-1] = Run(merged[-1].text.rstrip(), last.size, last.bold, last.color)
+            out.append(merged)
+        return out
+
+
 def _label_from_foreign_object(block: str) -> Label | None:
     """HTML labels. The <image> fallback right after the foreignObject is the exact box."""
     fo = _FO.search(block)
@@ -254,25 +347,33 @@ def _label_from_foreign_object(block: str) -> Label | None:
     fob = fo.group(0)
     x, y, w, h = (float(v) for v in img.groups())
     body = _INNER.search(fob)
-    raw = strip_markup(body.group(1) if body else fob)
-    lines = [line for line in raw.split("\n") if line.strip()]
+    if not body:
+        return None
+
+    # the inline-block wrapper carries the base styling; nested runs override it
+    wrapper = re.search(r'<div style="display: inline-block;([^"]*)"', fob)
+    base = wrapper.group(1) if wrapper else ""
+    m = re.search(r"font-size:\s*([\d.]+)px", base)
+    size = float(m.group(1)) if m else 12.0
+    m = re.search(r"font-weight:\s*(\w+)", base)
+    bold = bool(m) and m.group(1) in ("bold", "700")
+    m = _COLOR.search(base)
+    color = normalize_color(m.group(1)) if m else None
+
+    parser = _RunParser(size, bold, color)
+    parser.feed(body.group(1))
+    lines = parser.result()
     if not lines:
         return None
-    sizes = [float(s) for s in re.findall(r"font-size:\s*([\d.]+)px", fob)]
+
     families = re.findall(r"font-family:\s*([^;\"]+)", fob)
-    # innermost declaration wins for both size and weight (a <span> may reset the div)
-    weights = re.findall(r"font-weight:\s*(\w+)", fob)
-    color = None
-    for c in _COLOR.findall(fob):
-        color = normalize_color(c) or color
     bg = None
     for c in re.findall(r"background-color:\s*(#[0-9a-fA-F]{6})", fob):
         bg = normalize_color(c) or bg
     return Label(
         lines=lines, x=x, y=y, w=w, h=h,
-        size=sizes[-1] if sizes else 12.0,
-        bold=bool(weights) and weights[-1] in ("bold", "700"),
-        color=color, bg=bg,
+        size=max(r.size for line in lines for r in line),
+        bold=bold, color=color, bg=bg,
         align="left" if "justify-content: unsafe flex-start" in fob else "center",
         family=(families[-1].split(",")[0].strip() if families else "Helvetica"),
     )

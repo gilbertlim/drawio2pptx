@@ -171,29 +171,33 @@ def _draw_text(dr, shape, x0, y0, x1, y1, scale, fonts):
     for para in shape.text_frame.paragraphs:
         if not para.runs:
             continue
-        run = para.runs[0]
-        size_pt = run.font.size.pt if run.font.size else 12
-        px = max(6, round(size_pt * 12700 * scale))
-        key = (px, bool(run.font.bold))
-        if key not in fonts:
-            fonts[key] = _load_font(px, bool(run.font.bold))
-        colour = (0, 0, 0)
-        if run.font.color and run.font.color.type is not None:
-            try:
-                hexval = str(run.font.color.rgb)
-                colour = tuple(int(hexval[i:i + 2], 16) for i in (0, 2, 4))
-            except Exception:
-                pass
-        lh = (para.line_spacing.pt * 12700 * scale) if para.line_spacing else px * 1.25
-        lines.append(("".join(r.text for r in para.runs), fonts[key], colour, lh,
-                      str(para.alignment or "")))
+        pieces = []
+        for run in para.runs:
+            size_pt = run.font.size.pt if run.font.size else 12
+            px = max(6, round(size_pt * 12700 * scale))
+            key = (px, bool(run.font.bold))
+            if key not in fonts:
+                fonts[key] = _load_font(px, bool(run.font.bold))
+            colour = (0, 0, 0)
+            if run.font.color and run.font.color.type is not None:
+                try:
+                    hexval = str(run.font.color.rgb)
+                    colour = tuple(int(hexval[i:i + 2], 16) for i in (0, 2, 4))
+                except Exception:
+                    pass
+            pieces.append((run.text, fonts[key], colour))
+        biggest = max(f.size for _, f, _ in pieces) if pieces else 12
+        lh = (para.line_spacing.pt * 12700 * scale) if para.line_spacing else biggest * 1.25
+        lines.append((pieces, lh, str(para.alignment or "")))
     if not lines:
         return
-    cy = (y0 + y1) / 2 - sum(line[3] for line in lines) / 2
-    for text, font, colour, lh, align in lines:
-        bb = dr.textbbox((0, 0), text, font=font)
-        tx = x0 if align.startswith("LEFT") else (x0 + x1) / 2 - (bb[2] - bb[0]) / 2
-        dr.text((tx, cy + lh / 2), text, font=font, fill=colour, anchor="lm")
+    cy = (y0 + y1) / 2 - sum(lh for _, lh, _ in lines) / 2
+    for pieces, lh, align in lines:
+        widths = [dr.textlength(t, font=f) for t, f, _ in pieces]
+        tx = x0 if align.startswith("LEFT") else (x0 + x1) / 2 - sum(widths) / 2
+        for (text, font, colour), wd in zip(pieces, widths):
+            dr.text((tx, cy + lh / 2), text, font=font, fill=colour, anchor="lm")
+            tx += wd
         cy += lh
 
 
