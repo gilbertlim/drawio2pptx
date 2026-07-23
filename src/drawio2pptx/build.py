@@ -72,7 +72,24 @@ def _label_name(cell: model.Cell, kind: str) -> str:
     return f"{kind}: {text}" if text else f"{kind} {cell.id[-4:]}"
 
 
+# no `;base64` here on purpose: `;` separates style keys, so draw.io never writes it
 _DATA_URI = re.compile(r"data:image/(png|jpeg|jpg|gif),([A-Za-z0-9+/=]+)$")
+
+
+def _paints_nothing(paint) -> bool:
+    return paint is None or (not paint.fill or paint.fill == "none") and (
+        not paint.stroke or paint.stroke == "none")
+
+
+def _inset_sides(values: list[float]) -> tuple[float, float, float, float]:
+    """Expand the CSS `inset()` shorthand: 1, 2 or 3 values fill in the missing sides."""
+    if len(values) == 1:
+        return (values[0],) * 4
+    if len(values) == 2:                                   # top/bottom, left/right
+        return (values[0], values[1], values[0], values[1])
+    if len(values) == 3:                                   # top, left/right, bottom
+        return (values[0], values[1], values[2], values[1])
+    return tuple(values[:4])
 
 
 def extract_bitmap(cell: model.Cell, workdir: Path) -> Path | None:
@@ -97,7 +114,7 @@ def extract_bitmap(cell: model.Cell, workdir: Path) -> Path | None:
         from PIL import Image
 
         vals = [float(v.rstrip("%")) / 100 for v in clip.group(1).split()]
-        top, right, bottom, left = (vals + vals[:1] * 4)[:4]
+        top, right, bottom, left = _inset_sides(vals or [0.0])
         with Image.open(io.BytesIO(raw)) as im:
             W, H = im.size
             im.crop((round(left * W), round(top * H),
@@ -108,7 +125,8 @@ def extract_bitmap(cell: model.Cell, workdir: Path) -> Path | None:
 
 
 def collect(page: model.Page, svg: SvgMap, rendered: dict[str, stencils.Rendered],
-            frame: tuple[float, float, float, float], workdir: Path) -> list[Element]:
+            frame: tuple[float, float, float, float], workdir: Path,
+            progress=lambda *_: None) -> list[Element]:
     """Walk the page in paint order and describe every object to emit.
 
     Everything is expressed in SVG coordinates, since that is the space the label
@@ -161,8 +179,13 @@ def collect(page: model.Page, svg: SvgMap, rendered: dict[str, stencils.Rendered
             if path:
                 out.append(Element(kind="picture", x=bx, y=by, w=cell.w, h=cell.h,
                                    name=_label_name(cell, "icon"), image=path))
+            else:
+                # an external URL or an unsupported format: say so instead of leaving a hole
+                progress(f"skipped image {cell.id}: no embedded data to extract")
         elif cell.is_text_only:
             pass                                   # the label below is the whole object
+        elif cell.is_group_wrapper and _paints_nothing(svg.paint(cell.id)):
+            pass                                   # an invisible rect only swallows clicks
         else:
             # draw.io defaults an absent fillColor to white and strokeColor to black,
             # so ask the SVG what it painted instead of reading the style dict
@@ -365,6 +388,35 @@ class _Emitter:
 
 
 # --------------------------------------------------------------------------- slides
+def _slide_size(spec: str) -> tuple[int, int] | None:
+    """Preset name / `WxH` in inches -> EMU. None means 'auto' (follow the content)."""
+    if spec in SLIDE_SIZES:
+        return SLIDE_SIZES[spec]
+    if spec == "auto":
+        return None
+    w, _, h = spec.partition("x")
+    try:
+        emu = (int(float(w) * 914400), int(float(h) * 914400))
+    except ValueError:
+        emu = (0, 0)
+    if min(emu) <= 0:
+        raise ValueError(f"--slide-size {spec!r} is not one of {', '.join(SLIDE_SIZES)}, "
+                         "auto, or WxH in inches (e.g. 13.333x7.5)")
+    return emu
+
+
+def _open_deck(into: str | Path):
+    """Open the deck to insert into, failing with a readable message rather than a trace."""
+    from pptx.exc import PackageNotFoundError
+
+    path = Path(into).expanduser()
+    try:
+        return Presentation(str(path))
+    except PackageNotFoundError:
+        raise ValueError(f"no such deck: {path}" if not path.exists()
+                         else f"not a PowerPoint file: {path}") from None
+
+
 def _blank_layout(prs):
     """The layout with the fewest placeholders — 'Blank' in stock templates."""
     layouts = list(prs.slide_layouts)
@@ -395,13 +447,23 @@ def convert(source: str | Path, output: str | Path | None = None, *,
     source = Path(source).expanduser().resolve()
     if not source.exists():
         raise FileNotFoundError(f"no such diagram: {source}")
-    binary = stencils.find_drawio(drawio)
+
+    # everything below draw.io takes minutes, so reject bad arguments up front
+    if not 0 <= margin < 0.5:
+        raise ValueError(f"--margin {margin} must be at least 0 and below 0.5")
+    if into is None and slide is not None:
+        raise ValueError("--slide targets a slide in --into DECK.pptx; a new deck has none")
+    size = None if into else _slide_size(slide_size)
+    prs = _open_deck(into) if into else None
+    if prs is not None and slide is not None and not 1 <= slide <= len(prs.slides):
+        raise ValueError(f"--slide {slide} is out of range (deck has {len(prs.slides)} slides)")
 
     pages = model.parse(source)
     if not 1 <= page <= len(pages):
         names = ", ".join(f"{p.index}:{p.name}" for p in pages)
         raise ValueError(f"--page {page} is out of range. Pages: {names}")
     pg = pages[page - 1]
+    binary = stencils.find_drawio(drawio)
 
     workdir = Path(tempfile.mkdtemp(prefix="drawio2pptx-"))
     try:
@@ -415,24 +477,19 @@ def convert(source: str | Path, output: str | Path | None = None, *,
 
         rendered = stencils.render_cells(binary, pg, frame, workdir, scale=scale,
                                          progress=progress)
-        elements = collect(pg, svg, rendered, frame, workdir)
+        elements = collect(pg, svg, rendered, frame, workdir, progress=progress)
         cx, cy, cw, ch = content_bounds(elements)
 
         progress("writing slide")
-        if into:
-            prs = Presentation(str(Path(into).expanduser()))
+        if prs is not None:
             out_path = Path(output).expanduser() if output else Path(into).expanduser()
         else:
             prs = Presentation()
-            if slide_size in SLIDE_SIZES:
-                prs.slide_width, prs.slide_height = SLIDE_SIZES[slide_size]
-            elif slide_size == "auto":
+            if size:
+                prs.slide_width, prs.slide_height = size
+            else:                                          # 'auto': follow the content
                 prs.slide_width = 12192000
                 prs.slide_height = int(12192000 * ch / cw)
-            else:
-                w, _, h = slide_size.partition("x")
-                prs.slide_width, prs.slide_height = int(float(w) * 914400), int(float(h) * 914400)
-            slide = None
             out_path = Path(output).expanduser() if output else source.with_suffix(".pptx")
 
         target, index = _target_slide(prs, slide, replace)

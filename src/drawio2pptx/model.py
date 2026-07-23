@@ -43,6 +43,11 @@ class Cell:
         return self.shape == "mxgraph.aws4.group"
 
     @property
+    def is_group_wrapper(self) -> bool:
+        """A bare mxGraph group: it only holds children together and paints nothing."""
+        return self.st.get("group") is True
+
+    @property
     def is_text_only(self) -> bool:
         return self.st.get("text") is True and self.st.get("fillColor") in (None, "none")
 
@@ -85,6 +90,30 @@ def _floats(el, *names):
     return [float(el.get(n)) if el is not None and el.get(n) else None for n in names]
 
 
+def _origins(raw: dict[str, tuple[str | None, float, float]]) -> dict[str, tuple[float, float]]:
+    """Absolute origin of every cell, following the `parent` chain.
+
+    mxGraph stores a child's geometry relative to its parent, so a shape dropped into a
+    group or a container carries offsets, not coordinates. Reading them as absolute puts
+    the shape somewhere else entirely without raising anything.
+    """
+    out: dict[str, tuple[float, float]] = {}
+
+    def resolve(cid: str | None, seen: frozenset) -> tuple[float, float]:
+        if cid is None or cid not in raw or cid in seen:      # root, or a malformed cycle
+            return (0.0, 0.0)
+        if cid in out:
+            return out[cid]
+        parent, x, y = raw[cid]
+        px, py = resolve(parent, seen | {cid})
+        out[cid] = (px + x, py + y)
+        return out[cid]
+
+    for cid in raw:
+        resolve(cid, frozenset())
+    return out
+
+
 def parse(path: str | Path) -> list[Page]:
     """Read every <diagram> page of a .drawio file.
 
@@ -106,20 +135,32 @@ def parse(path: str | Path) -> list[Page]:
                     "Extras > Edit Diagram > Compressed, or re-save with 'Uncompressed XML'."
                 )
             continue
+        nodes = [mx for mx in model.findall(".//mxCell") if mx.get("id") not in ("0", "1")]
+        geoms = {mx.get("id"): mx.find("mxGeometry") for mx in nodes}
+        origins = _origins({
+            mx.get("id"): (mx.get("parent"),
+                           *(v or 0.0 for v in _floats(geoms[mx.get("id")], "x", "y")))
+            for mx in nodes
+        })
+
         cells: list[Cell] = []
-        for mx in model.findall(".//mxCell"):
+        for mx in nodes:
             cid = mx.get("id")
-            if cid in ("0", "1"):
-                continue
-            geo = mx.find("mxGeometry")
+            geo = geoms[cid]
             x, y, w, h = _floats(geo, "x", "y", "width", "height")
+            # a child's geometry is an offset from its parent, except for `relative=1`
+            # cells (edge labels), whose x/y are fractions along the edge
+            ox, oy = origins.get(mx.get("parent"), (0.0, 0.0))
+            if geo is not None and geo.get("relative") != "1":
+                x = x if x is None else x + ox
+                y = y if y is None else y + oy
             pts = []
             if geo is not None:
                 for p in geo.findall("./Array[@as='points']/mxPoint"):
-                    pts.append((float(p.get("x", 0)), float(p.get("y", 0))))
+                    pts.append((float(p.get("x", 0)) + ox, float(p.get("y", 0)) + oy))
                 for p in geo.findall("./mxPoint"):
                     if p.get("as") in ("sourcePoint", "targetPoint"):
-                        pts.append((float(p.get("x", 0)), float(p.get("y", 0))))
+                        pts.append((float(p.get("x", 0)) + ox, float(p.get("y", 0)) + oy))
             style = mx.get("style") or ""
             cells.append(Cell(
                 id=cid, value=mx.get("value") or "", style=style, st=parse_style(style),

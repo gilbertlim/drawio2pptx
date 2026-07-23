@@ -171,20 +171,23 @@ class SvgMap:
 
 
 # ------------------------------------------------------------------- internals
+# command -> (token count including the command, index of the endpoint's x)
+_PATH_CMDS = {"M": (3, 1), "L": (3, 1), "Q": (5, 3), "C": (7, 5)}
+
+
 def _path_points(d: str) -> list[tuple[float, float]]:
-    """Flatten an M/L/C path to its anchor points (curves keep only their endpoint)."""
+    """Flatten a path to its anchor points (curves keep only their endpoint).
+
+    Rounded bends arrive as `Q`. Skipping the command drops the corner outright and the
+    connector then cuts across it diagonally.
+    """
     toks = d.replace(",", " ").split()
     pts, i = [], 0
     while i < len(toks):
-        t = toks[i]
-        if t in ("M", "L"):
-            pts.append((float(toks[i + 1]), float(toks[i + 2])))
-            i += 3
-        elif t == "C":
-            pts.append((float(toks[i + 5]), float(toks[i + 6])))
-            i += 7
-        else:
-            i += 1
+        step, at = _PATH_CMDS.get(toks[i], (1, 0))
+        if at and i + step <= len(toks):
+            pts.append((float(toks[i + at]), float(toks[i + at + 1])))
+        i += step
     return pts
 
 

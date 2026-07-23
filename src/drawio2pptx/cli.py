@@ -63,6 +63,11 @@ def main(argv: list[str] | None = None) -> int:
     source = Path(args.source).expanduser()
     say = (lambda *_: None) if args.quiet else (lambda m: print(f"  {m}", file=sys.stderr))
 
+    if not args.into and (args.slide is not None or args.replace):
+        print("drawio2pptx: --slide and --replace apply to --into DECK.pptx. "
+              "A newly created deck has no slide to target.", file=sys.stderr)
+        return 2
+
     if not source.exists():
         print(f"drawio2pptx: no such diagram: {source}", file=sys.stderr)
         sample = Path(__file__).resolve().parents[2] / "examples" / "sample.drawio"
