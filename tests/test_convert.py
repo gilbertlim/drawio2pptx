@@ -174,3 +174,40 @@ def test_arrowheads_are_drawn_at_drawio_size(tmp_path):
         for pt in path.iter(qn("a:pt")):
             assert 0 <= int(pt.get("x")) <= w and 0 <= int(pt.get("y")) <= h, \
                 etree.tostring(path)
+
+
+def test_default_styled_shape_keeps_its_fill_and_border(tmp_path):
+    """draw.io defaults an absent fillColor to white and strokeColor to black. Reading
+    'missing' as 'none' made such shapes vanish, leaving only their label behind."""
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.oxml.ns import qn
+
+    src = tmp_path / "plain.drawio"
+    src.write_text(
+        '<mxfile><diagram name="p" id="p"><mxGraphModel grid="0" page="1">'
+        '<root><mxCell id="0"/><mxCell id="1" parent="0"/>'
+        '<mxCell id="a" value="GW" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" '
+        'parent="1"><mxGeometry x="100" y="100" width="50" height="22" as="geometry"/></mxCell>'
+        '<mxCell id="b" value="sq" style="rounded=0;whiteSpace=wrap;html=1;" vertex="1" '
+        'parent="1"><mxGeometry x="300" y="100" width="80" height="40" as="geometry"/></mxCell>'
+        "</root></mxGraphModel></diagram></mxfile>", encoding="utf-8")
+
+    out = tmp_path / "plain.pptx"
+    convert(src, out)
+    boxes = {s.name.removeprefix("area: "): s
+             for s in Presentation(str(out)).slides[0].shapes if s.name.startswith("area: ")}
+    assert sorted(boxes) == ["GW", "sq"]
+
+    for shape in boxes.values():
+        spPr = shape._element.spPr
+        assert spPr.find(qn("a:noFill")) is None, f"{shape.name} lost its white fill"
+        fill = spPr.find(qn("a:solidFill"))
+        assert fill is not None and fill.find(qn("a:srgbClr")).get("val") == "FFFFFF"
+        ln = spPr.find(qn("a:ln"))
+        assert ln is not None and ln.find(qn("a:solidFill")) is not None, \
+            f"{shape.name} lost its black border"
+        assert ln.find(qn("a:solidFill")).find(qn("a:srgbClr")).get("val") == "000000"
+
+    assert boxes["GW"].auto_shape_type == MSO_SHAPE.ROUNDED_RECTANGLE, \
+        "rounded=1 must round the corners"
+    assert boxes["sq"].auto_shape_type == MSO_SHAPE.RECTANGLE

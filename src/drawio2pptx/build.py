@@ -47,6 +47,7 @@ class Element:
     stroke: str | None = None
     stroke_w: float = 1.0
     dashed: bool = False
+    radius: float = 0.0                # corner radius in diagram px
     image: Path | None = None
     points: list[tuple[float, float]] = field(default_factory=list)
     head_arrow: bool = False
@@ -163,12 +164,19 @@ def collect(page: model.Page, svg: SvgMap, rendered: dict[str, stencils.Rendered
         elif cell.is_text_only:
             pass                                   # the label below is the whole object
         else:
-            out.append(Element(kind="rect", x=bx, y=by, w=cell.w, h=cell.h,
-                               name=_label_name(cell, "area"),
-                               fill=str(cell.st.get("fillColor") or "") or None,
-                               stroke=str(cell.st.get("strokeColor") or "") or None,
-                               stroke_w=float(cell.st.get("strokeWidth", 1) or 1),
-                               dashed=cell.st.get("dashed") == "1"))
+            # draw.io defaults an absent fillColor to white and strokeColor to black,
+            # so ask the SVG what it painted instead of reading the style dict
+            paint = svg.paint(cell.id)
+            out.append(Element(
+                kind="rect", x=bx, y=by, w=cell.w, h=cell.h,
+                name=_label_name(cell, "area"),
+                fill=paint.fill if paint else str(cell.st.get("fillColor") or "") or None,
+                stroke=paint.stroke if paint else str(cell.st.get("strokeColor") or "") or None,
+                stroke_w=(paint.stroke_width if paint
+                          else float(cell.st.get("strokeWidth", 1) or 1)),
+                dashed=paint.dashed if paint else cell.st.get("dashed") == "1",
+                radius=paint.radius if paint else 0.0,
+            ))
 
         if label:
             out.append(Element(kind="text", x=label.x, y=label.y, w=label.w, h=label.h,
@@ -231,9 +239,13 @@ class _Emitter:
                 ln.append(ln.makeelement(tag, {"type": "triangle", "w": "med", "len": "med"}))
 
     def rect(self, e: Element):
-        sh = self.shapes.add_shape(MSO_SHAPE.RECTANGLE, self.X(e.x), self.Y(e.y),
+        shape = MSO_SHAPE.ROUNDED_RECTANGLE if e.radius else MSO_SHAPE.RECTANGLE
+        sh = self.shapes.add_shape(shape, self.X(e.x), self.Y(e.y),
                                    self.L(e.w), self.L(e.h))
         sh.name = e.name
+        if e.radius and min(e.w, e.h):
+            # roundRect's adjustment is the radius as a fraction of the shorter side
+            sh.adjustments[0] = min(0.5, e.radius / min(e.w, e.h))
         fill = _rgb(e.fill) if e.fill and e.fill != "none" else None
         if fill:
             sh.fill.solid()

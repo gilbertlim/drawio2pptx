@@ -27,6 +27,16 @@ class Label:
 
 
 @dataclass
+class Paint:
+    """Resolved fill and stroke for a plain shape, straight from the SVG."""
+    fill: str | None            # '#rrggbb', or None for no fill
+    stroke: str | None
+    stroke_width: float
+    dashed: bool
+    radius: float               # corner radius in px; 0 for a square rectangle
+
+
+@dataclass
 class EdgeRoute:
     points: list[tuple[float, float]]
     color: str
@@ -68,6 +78,36 @@ class SvgMap:
             _, _, w, h = (float(v) for v in m.group(1).split())
             return w, h
         raise ValueError("could not read the SVG canvas size")
+
+    def paint(self, cell_id: str) -> "Paint | None":
+        """How draw.io actually painted a plain shape.
+
+        The style dict is not enough: draw.io falls back to a white fill and a black
+        border when `fillColor` / `strokeColor` are absent, so reading "missing" as
+        "none" erases the shape. The SVG carries the resolved values, and the corner
+        radius with them.
+        """
+        block = self.blocks.get(cell_id)
+        if not block:
+            return None
+        m = re.search(r"<rect\s([^>]*?)/>", block)
+        if not m:
+            return None
+        attrs = m.group(1)
+
+        def get(key):
+            found = re.search(rf'\b{key}="([^"]*)"', attrs)
+            return found.group(1) if found else None
+
+        width = get("stroke-width")
+        radius = get("rx")
+        return Paint(
+            fill=normalize_color(get("fill")),
+            stroke=normalize_color(get("stroke")),
+            stroke_width=float(width) if width else 1.0,
+            dashed=bool(get("stroke-dasharray")),
+            radius=float(radius) if radius else 0.0,
+        )
 
     def frame_rect(self, frame_id: str) -> tuple[float, float, float, float]:
         """Where the injected frame rect actually landed in this export.

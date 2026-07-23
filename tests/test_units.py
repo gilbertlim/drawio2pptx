@@ -160,3 +160,25 @@ def test_missing_file_without_the_placeholder_name(capsys):
     err = capsys.readouterr().err
     assert "no such diagram" in err
     assert "placeholder" not in err
+
+
+# ------------------------------------------------------------------ shape paint
+PAINT_SVG = """<svg width="10px" height="10px">
+<g data-cell-id="round"><g transform="translate(0.5,0.5)"><rect x="388" y="401" width="50"
+ height="21.5" rx="3.23" ry="3.23" fill="#ffffff" stroke="#000000" pointer-events="all"/></g></g>
+<g data-cell-id="tinted"><g transform="translate(0.5,0.5)"><rect x="80" y="110" width="490"
+ height="130" fill="#dae8fc" stroke="none" pointer-events="all"/></g></g></svg>"""
+
+
+def test_paint_reads_the_resolved_fill_and_border():
+    p = SvgMap(PAINT_SVG).paint("round")
+    assert p.fill == "#FFFFFF", "an absent fillColor resolves to white, not to no fill"
+    assert p.stroke == "#000000"
+    assert p.radius == 3.23
+
+
+def test_paint_keeps_an_explicit_none_border():
+    p = SvgMap(PAINT_SVG).paint("tinted")
+    assert p.fill == "#DAE8FC"
+    assert p.stroke is None
+    assert p.radius == 0.0
