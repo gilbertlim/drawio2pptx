@@ -13,6 +13,10 @@ dist/
 # generated output and local fixtures
 *.pptx
 ~$*
+
+# draw.io 자동저장 잔여물
+.$*.dtmp
+.$*.bkp
 tests/_out/
 fixtures-private/
 
