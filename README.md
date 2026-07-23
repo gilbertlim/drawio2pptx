@@ -86,33 +86,26 @@ pip install .
 uv run --with python-pptx --with pillow python -m drawio2pptx examples/sample.drawio
 ```
 
-### 잘 되는지 먼저 확인
-
-레포에 예제가 들어 있으니 이걸로 한 번 돌려보세요. 아래 명령들에 나오는 `diagram.drawio`는 실제 파일이
-아니라 **자리표시자**입니다. 본인 파일 경로로 바꿔서 쓰세요.
-
-```bash
-drawio2pptx examples/sample.drawio -o hello.pptx
-# hello.pptx  (slide 1, 31 objects: 3 shapes, 8 connectors, 11 text boxes, 9 icons)
-```
-
 ### 명령줄
 
+레포 루트에서 아래를 순서대로 복붙하면 그대로 돌아갑니다. `examples/sample.drawio` 자리에 본인 파일
+경로를 넣으면 됩니다.
+
 ```bash
-# diagram.drawio -> diagram.pptx, 16:9 슬라이드 한 장. 이게 전부입니다.
-drawio2pptx diagram.drawio
+# 가장 단순한 형태. sample.drawio -> sample.pptx, 16:9 슬라이드 한 장
+drawio2pptx examples/sample.drawio
 
 # 출력 파일명 지정
-drawio2pptx diagram.drawio -o deck.pptx
+drawio2pptx examples/sample.drawio -o deck.pptx
 
-# 이미 있는 덱의 2번 슬라이드에 넣기, 그 슬라이드 기존 내용은 지우고
-drawio2pptx diagram.drawio --into deck.pptx --slide 2 --replace
+# 방금 만든 덱의 1번 슬라이드에 다시 넣기, 기존 내용은 지우고
+drawio2pptx examples/sample.drawio --into deck.pptx --slide 1 --replace
 
 # 여러 페이지짜리 다이어그램을 페이지당 슬라이드 하나로
-drawio2pptx diagram.drawio --all-pages -o deck.pptx
+drawio2pptx examples/sample.drawio --all-pages -o pages.pptx
 
 # 변환하고, 제대로 나왔는지 눈으로 볼 수 있게
-drawio2pptx diagram.drawio --verify check.png
+drawio2pptx examples/sample.drawio --verify check.png
 ```
 
 | 플래그 | 용도 |
@@ -134,7 +127,7 @@ drawio2pptx diagram.drawio --verify check.png
 ```python
 from drawio2pptx import convert
 
-result = convert("diagram.drawio", "deck.pptx", slide_size="16:9", margin=0.03)
+result = convert("examples/sample.drawio", "deck.pptx", slide_size="16:9", margin=0.03)
 print(result.path, result.counts)
 # deck.pptx {'rect': 10, 'picture': 28, 'line': 22, 'text': 39}
 ```
@@ -162,7 +155,7 @@ PowerPoint에서 색을 바꾸지는 못합니다. 나머지는 전부 네이티
 변환 오류는 눈으로 보이는 종류입니다. 그러니 보세요.
 
 ```bash
-drawio2pptx diagram.drawio --verify check.png
+drawio2pptx examples/sample.drawio --verify check.png
 ```
 
 `check.png`는 세 단으로 나옵니다. 위는 draw.io 자체 export, 가운데는 저장된 `.pptx`를 다시 그려낸 것,

@@ -12,6 +12,9 @@ dist/
 
 # generated output and local fixtures
 *.pptx
-!examples/*.pptx
+~$*
 tests/_out/
 fixtures-private/
+
+# uv 로컬 락 (pip 설치 사용자에겐 무의미)
+uv.lock
