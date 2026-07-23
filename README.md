@@ -95,14 +95,16 @@ print(result.path, result.counts)
 
 ## As a Claude Code skill
 
-Copy or symlink this repo into your skills directory and Claude will use it when you
-ask for a diagram in a deck:
+The skill lives at `.claude/skills/drawio2pptx/`, so Claude Code picks it up automatically
+when you work inside this repo. To make it available everywhere, symlink it into your
+personal skills directory:
 
 ```bash
-ln -s "$PWD" ~/.claude/skills/drawio2pptx
+ln -s "$PWD/.claude/skills/drawio2pptx" ~/.claude/skills/drawio2pptx
 ```
 
-See [SKILL.md](SKILL.md).
+Then "put this diagram in the deck" is enough — see
+[the skill](.claude/skills/drawio2pptx/SKILL.md).
 
 ## How it works
 
