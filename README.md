@@ -41,11 +41,14 @@ winget install JGraph.Draw            # Windows
 Then install this repo:
 
 ```bash
-git clone <this repo> && cd drawio2pptx
+git clone https://github.com/gilbertlim/drawio2pptx && cd drawio2pptx
 pip install .
 ```
 
-Or run it straight from a clone without installing:
+That puts a `drawio2pptx` command on your PATH. To keep it out of the system Python,
+use `uv tool install .` or `pipx install .` instead.
+
+Or run it from the clone without installing anything:
 
 ```bash
 uv run --with python-pptx --with pillow python -m drawio2pptx diagram.drawio
