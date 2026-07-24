@@ -108,9 +108,10 @@ def test_needs_render_skips_bitmaps_but_keeps_svg_data_uris():
 
 # ------------------------------------------------------------------ svg reading
 TEXT_SVG = """<svg width="100px" height="50px" viewBox="0 0 100 50">
-<g data-cell-id="n1"><g fill="#000000" font-family="Helvetica" text-anchor="middle"
+<g data-cell-id="n1"><g><image x="60" y="230" width="60" height="60" href="data:image/png,x"/>
+</g><g><g fill="#000000" font-family="Helvetica" text-anchor="middle"
  font-size="12px"><rect fill="#eef0f3" stroke="none" x="60" y="290" width="37" height="15"
- stroke-width="0"/><text x="78" y="300">DBMS</text></g></g>
+ stroke-width="0"/><text x="78" y="300">DBMS</text></g></g></g>
 <g data-cell-id="e1"><g transform="translate(0.5,0.5)"><path d="M 10 20 L 40 20 L 40 60"
  fill="none" stroke="#000000" stroke-miterlimit="10"/></g></g>
 <g data-cell-id="fr"><g transform="translate(0.5,0.5)"><rect x="3" y="4" width="100"
@@ -125,7 +126,9 @@ def test_label_uses_the_background_rect_as_the_exact_box():
     assert lab.size == 12 and lab.align == "center" and lab.bg == "#EEF0F3"
 
 
-FO_MIXED = """<svg><g data-cell-id="mix"><g><g><switch><foreignObject>
+FO_MIXED = """<svg><g data-cell-id="mix">
+<g transform="translate(0.5,0.5)"><rect x="0" y="0" width="60" height="30" fill="#ffffff"/></g>
+<g><g><switch><foreignObject>
 <div xmlns="http://www.w3.org/1999/xhtml" style="display: flex;">
 <div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
 <div style="display: inline-block; font-size: 12px; font-family: Helvetica;">
@@ -140,6 +143,40 @@ def test_a_line_keeps_a_separate_size_per_run():
     sizes = [(r.text, r.size) for r in lab.lines[0]]
     assert sizes == [("\u23f0", 20.0), (" Text", 12.0)], sizes
     assert lab.size == 20.0, "line spacing follows the tallest run"
+
+
+# some stencils letter themselves: kubernetesLabel=1 paints "pod" into the icon, and that
+# <text> sits in the drawing group, indistinguishable from a label once the group is flat
+LETTERED_SVG = """<svg width="100px" height="100px" viewBox="0 0 100 100">
+<g data-cell-id="plain"><g transform="translate(0.5,0.5)">
+<path d="M 24 0 L 49 31 L 15 48 Z" fill="#2875e2" stroke="none"/>
+<g fill="#ffffff" font-family="Arial, Helvetica" text-anchor="middle" font-size="9.6px">
+<text x="25" y="39.8">pod</text></g></g>
+<g><g fill="#000000" font-family="Helvetica" text-anchor="middle" font-size="12px">
+<text x="25" y="66">WAS</text></g></g></g>
+<g data-cell-id="html"><g transform="translate(0.5,0.5)">
+<path d="M 124 0 L 149 31 L 115 48 Z" fill="#2875e2" stroke="none"/>
+<g fill="#ffffff" font-family="Arial, Helvetica" text-anchor="middle" font-size="9.6px">
+<text x="125" y="39.8">pod</text></g></g>
+<g><g><switch><foreignObject><div xmlns="http://www.w3.org/1999/xhtml" style="display: flex;">
+<div style="box-sizing: border-box; font-size: 0; text-align: center; color: #000000; ">
+<div style="display: inline-block; font-size: 12px; font-family: Helvetica;">WAS</div>
+</div></div></foreignObject><image x="111" y="55" width="27" height="17"/></switch></g></g></g>
+<g data-cell-id="bare"><g transform="translate(0.5,0.5)">
+<path d="M 224 0 L 249 31 L 215 48 Z" fill="#2875e2" stroke="none"/>
+<g fill="#ffffff" font-family="Arial, Helvetica" text-anchor="middle" font-size="9.6px">
+<text x="225" y="39.8">pod</text></g></g></g></svg>"""
+
+
+@pytest.mark.parametrize("cell_id", ["plain", "html"])
+def test_a_stencil_that_letters_itself_does_not_shadow_the_cell_label(cell_id):
+    """The icon's own "pod" lettering must not be read as the cell's label."""
+    assert SvgMap(LETTERED_SVG).label(cell_id).text == "WAS"
+
+
+def test_a_lettered_stencil_with_no_label_reports_none():
+    """Otherwise the lettering comes back as a text box stamped over the icon."""
+    assert SvgMap(LETTERED_SVG).label("bare") is None
 
 
 def test_edge_route_keeps_every_bend():

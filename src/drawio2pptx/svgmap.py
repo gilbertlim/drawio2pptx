@@ -144,7 +144,8 @@ class SvgMap:
         block = self.blocks.get(cell_id)
         if not block:
             return None
-        return _label_from_text(block) or _label_from_foreign_object(block)
+        region = _label_region(block)
+        return _label_from_text(region) or _label_from_foreign_object(region)
 
     # ------------------------------------------------------------------- edges
     def edge(self, cell_id: str) -> EdgeRoute | None:
@@ -171,6 +172,33 @@ class SvgMap:
 
 
 # ------------------------------------------------------------------- internals
+_G_TAG = re.compile(r"<g\b[^>]*?(/?)>|</g>")
+
+
+def _label_region(block: str) -> str:
+    """The part of a cell's group that can hold its label: everything past the drawing.
+
+    draw.io emits the shape (or the edge route) as the group's first child and the label,
+    when there is one, as a sibling right after it. That split matters because some
+    stencils letter themselves — `kubernetesLabel=1` paints "pod" into the icon, aws4
+    badges do the same — and read as flat markup that lettering is just another <text>.
+    Searching the whole group returns it instead of the cell's label, or in place of a
+    label that isn't there at all.
+    """
+    open_tag = block.find(">")
+    if open_tag < 0:
+        return ""
+    depth = 0
+    for m in _G_TAG.finditer(block, open_tag + 1):
+        if m.group(0).startswith("</"):
+            depth -= 1
+            if depth <= 0:                  # the drawing closed; the rest is label markup
+                return block[m.end():]
+        elif not m.group(1):                # ignore self-closing <g .../>
+            depth += 1
+    return ""
+
+
 # command -> (token count including the command, index of the endpoint's x)
 _PATH_CMDS = {"M": (3, 1), "L": (3, 1), "Q": (5, 3), "C": (7, 5)}
 
